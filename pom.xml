@@ -90,7 +90,6 @@
 			<artifactId>zt-exec</artifactId>
 			<version>1.12</version>
 		</dependency>
-
 		<!-- TEST -->
 		<dependency>
 			<groupId>commons-codec</groupId>

@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
+import java.nio.file.Files;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -29,9 +30,9 @@ import com.github.packageurl.PackageURL;
 public class Libraries {
 
 	// FIXME: set Scope.EXCLUDED for non-invoked libraries - private Set<Component> invoked = new HashSet<>();
-    private Set<String> codesourceExamined = new HashSet<>();
-    private Set<Component> libraries = new HashSet<>();
-    private Set<org.cyclonedx.model.Dependency> dependencies = new HashSet<>();
+    private final Set<String> codesourceExamined = new HashSet<>();
+    private final Set<Component> libraries = new HashSet<>();
+    private final Set<org.cyclonedx.model.Dependency> dependencies = new HashSet<>();
     private Hash rootSHA1;
     private Hash rootMD5;
 
@@ -51,7 +52,7 @@ public class Libraries {
     }
 
     // find containing jar file and include ALL libraries
-    public void addAllLibraries( Class clazz, String codesource ) {
+    public void addAllLibraries( Class<?> clazz, String codesource ) {
 
         // FIXME - change codesourceExamined to a Map<codesource, Library>
         // increment library.classesUsed;
@@ -62,7 +63,7 @@ public class Libraries {
 
         try {
             String filepath = codesource.substring( codesource.lastIndexOf(":") + 1);
-            String parts[] = filepath.split( "!/" );
+            String[] parts = filepath.split( "!/" );
             String path = parts[0];
             if(File.separator.equals("\\")) {
                 path = path.replace("\\", "/");
@@ -81,10 +82,12 @@ public class Libraries {
             rootMD5 = new Hash( Hash.Algorithm.MD5, md5 );
 
             // scan for nested libraries
-            JarInputStream jis3 = new JarInputStream( new FileInputStream( f ) );
-            JarFile jarfile = new JarFile( f );
-            scan( jarfile, jis3, f.getAbsolutePath() );
-            addRootHashesToRootJar();
+            try (JarInputStream jis3 = 
+                         new JarInputStream(Files.newInputStream(f.toPath()));
+                 JarFile jarfile = new JarFile( f )) {
+                scan( jarfile, jis3, f.getAbsolutePath() );
+                addRootHashesToRootJar();
+            }
         } catch( Exception e ) {
             Logger.log( "The jbom project needs your help to deal with unusual CodeSources." );
             Logger.log( "Report issue here: https://github.com/Contrast-Security-OSS/jbom/issues/new/choose" );
@@ -96,7 +99,7 @@ public class Libraries {
 
     private void addRootHashesToRootJar() {
         for( Component lib : libraries.stream()
-                .filter(lib-> lib.getHashes()==null||lib.getHashes().isEmpty())
+                .filter(lib -> lib.getHashes() == null || lib.getHashes().isEmpty())
                 .collect(Collectors.toList())) {
             lib.addHash(rootSHA1);
             lib.addHash(rootMD5);
@@ -138,7 +141,6 @@ public class Libraries {
     }
 
     public void scanInner( String codesource, JarFile jarFile, JarInputStream jis, JarEntry entry ) throws Exception {
-
         Library innerlib = new Library();
         // FIXME: set Scope.EXCLUDED for non-invoked libraries
         innerlib.setScope( Scope.REQUIRED );
@@ -149,41 +151,43 @@ public class Libraries {
         libraries.add( innerlib );
         innerlib.setType( Library.Type.LIBRARY );
 
-        InputStream nis1 = jarFile.getInputStream( entry );
-        String md5 = hash( nis1, MessageDigest.getInstance("MD5") );
-        innerlib.addHash( new Hash( Hash.Algorithm.MD5, md5 ) );
+        try (InputStream nis1 = jarFile.getInputStream( entry )) {
+            String md5 = hash( nis1, MessageDigest.getInstance("MD5") );
+            innerlib.addHash( new Hash( Hash.Algorithm.MD5, md5 ) );
+        }
 
-        InputStream nis2 = jarFile.getInputStream( entry );
-        String sha1 = hash( nis2, MessageDigest.getInstance("SHA1") );
-        innerlib.addHash( new Hash( Hash.Algorithm.SHA1, sha1 ) );
+        try (InputStream nis2 = jarFile.getInputStream( entry )) {
+            String sha1 = hash( nis2, MessageDigest.getInstance("SHA1") );
+            innerlib.addHash( new Hash( Hash.Algorithm.SHA1, sha1 ) );
+            innerlib.addProperty( "maven", "https://search.maven.org/search?q=1:" + sha1 );
+        }
 
-        innerlib.addProperty( "maven", "https://search.maven.org/search?q=1:" + sha1 );
-
-        InputStream nis3 = jarFile.getInputStream( entry );
-        JarInputStream innerJis = new JarInputStream( nis3 );
-
-        Manifest mf = innerJis.getManifest();
-        if ( mf != null ) {
-            Attributes attr = mf.getMainAttributes();
-            String group = attr.getValue( "Implementation-Vendor-Id" );
-            String artifact = attr.getValue( "Implementation-Title" );
-            if ( group != null ) innerlib.setGroup(group);
-            if ( artifact != null ) innerlib.setName(artifact);
+        try (InputStream nis3 = jarFile.getInputStream( entry );
+             JarInputStream innerJis = new JarInputStream( nis3 )) {
+            Manifest mf = innerJis.getManifest();
+            if ( mf != null ) {
+                Attributes attr = mf.getMainAttributes();
+                String group = attr.getValue( "Implementation-Vendor-Id" );
+                String artifact = attr.getValue( "Implementation-Title" );
+                if ( group != null ) innerlib.setGroup(group);
+                if ( artifact != null ) innerlib.setName(artifact);
+            }
         }
 
         // scan through this jar to find any pom files
-        InputStream nis4 = jarFile.getInputStream( entry );
-        JarInputStream innerJis4 = new JarInputStream( nis4 );
-        while ((entry = innerJis4.getNextJarEntry()) != null) {
-            if ( isPom(entry) ) {
-                try {
-                    parsePom( innerJis4, innerlib );
-                } catch( Exception e ) {
-                    // Logger.log( "Problem parsing POM from " + nestedName + " based on " + codesource + ". Continuing." );
+        try (InputStream nis4 = jarFile.getInputStream( entry );
+             JarInputStream innerJis4 = new JarInputStream( nis4 )) {
+            while ((entry = innerJis4.getNextJarEntry()) != null) {
+                if ( isPom(entry) ) {
+                    try {
+                        parsePom( innerJis4, innerlib );
+                    } catch( Exception e ) {
+                        // Logger.log( "Problem parsing POM from " + nestedName + " based on " + codesource + ". Continuing." );
+                    }
                 }
             }
         }
-        
+
         try {
             if ( innerlib.getGroup() != null && innerlib.getName() != null ) {
                 innerlib.setPurl(new PackageURL( PackageURL.StandardTypes.MAVEN, innerlib.getGroup(), innerlib.getName(), innerlib.getVersion(), null, null));
@@ -222,15 +226,17 @@ public class Libraries {
         MavenXpp3Reader reader = new MavenXpp3Reader();
         Model model = reader.read(is);
         // Model model = reader.read(new StringReader( pom ));
-        String g = model.getGroupId();
-        String a = model.getArtifactId();
-        String v = model.getVersion();
-        if ( g != null ) lib.setGroup( g );
-        if ( a != null ) lib.setName( a );
-        if ( v != null ) lib.setVersion( v );
+        String group = model.getGroupId();
+        String artifact = model.getArtifactId();
+        String version = model.getVersion();
+
+        // Null handling should be more robust?
+        if ( group != null ) lib.setGroup( group );
+        if ( artifact != null ) lib.setName( artifact );
+        if ( version != null ) lib.setVersion( version );
         lib.setBomRef(getUniqueRef(lib.getGroup(),lib.getName(),lib.getVersion()));
         org.cyclonedx.model.Dependency cycloneDep = new org.cyclonedx.model.Dependency(getUniqueRef(lib.getGroup(),lib.getName(),lib.getVersion()));
-        for(Dependency dep : model.getDependencies()) {
+        for (Dependency dep : model.getDependencies()) {
             org.cyclonedx.model.Dependency subDep = new org.cyclonedx.model.Dependency(getUniqueRef(dep.getGroupId(),dep.getArtifactId(),dep.getVersion()));
             cycloneDep.addDependency(subDep);
         }
@@ -238,11 +244,11 @@ public class Libraries {
     }
 
     public List<Component> getLibraries() {
-        return new ArrayList<Component>(libraries);
+        return new ArrayList<>(libraries);
     }
 
     public List<org.cyclonedx.model.Dependency> getDependencies() {
-        return new ArrayList<org.cyclonedx.model.Dependency>(dependencies);
+        return new ArrayList<>(dependencies);
     }
 
     public void dump() {
@@ -259,7 +265,7 @@ public class Libraries {
         while ((len = is.read(buf, 0, buf.length)) != -1) {
             baos.write(buf, 0, len);
         }
-        return new String( baos.toByteArray(), "UTF-8" );
+        return baos.toString("UTF-8");
     }
 
     // streaming hash, low memory use
