@@ -8,6 +8,8 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.nio.file.Files;
+import java.security.MessageDigest;
 import java.util.Optional;
 
 import org.apache.commons.codec.digest.DigestUtils;
@@ -25,6 +27,10 @@ public class LibrariesTest {
         Libraries libs = jbom.doLocalFile( jar, "target/test" );
         assertTrue( "Incorrect number of libraries found. " + libs.getLibraries().size() + " instead of 135", libs.getLibraries().size() == 135 );
         compareHashToFile(jar,libs,"petclinic");
+        assertEquals("8ef0a3efc567782abda2feac290ce1ffad85f045", hashFileSHA1(jar));
+
+        String sha1 = Libraries.hash(Files.newInputStream(jar.toPath()), MessageDigest.getInstance("SHA1") );
+        assertEquals("8ef0a3efc567782abda2feac290ce1ffad85f045", sha1);
     }
 
     @Test
