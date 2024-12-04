@@ -36,6 +36,8 @@ public class Libraries {
     private Hash rootSHA1;
     private Hash rootMD5;
 
+    public static final char[] HEX_ARRAY = "0123456789abcdef".toCharArray();
+
     public void runScan(File jarPath) throws Exception {
         addAllLibraries( null, jarPath.getAbsolutePath() );
     }
@@ -64,21 +66,21 @@ public class Libraries {
         try {
             String filepath = codesource.substring( codesource.lastIndexOf(":") + 1);
             String[] parts = filepath.split( "!/" );
-            String path = parts[0];
+            String pathStr = parts[0];
             if(File.separator.equals("\\")) {
-                path = path.replace("\\", "/");
+                pathStr = pathStr.replace("\\", "/");
             }
-            if ( codesourceExamined.contains( path ) ) {
+            if ( codesourceExamined.contains( pathStr ) ) {
                 return;
             }
-            codesourceExamined.add( path );
+            codesourceExamined.add( pathStr );
 
-            File f = new File( path );
+            File f = new File( pathStr );
 
-            String sha1 = hash( new FileInputStream( f ), MessageDigest.getInstance("SHA1") );
+            String sha1 = hash( Files.newInputStream( f.toPath() ), MessageDigest.getInstance("SHA1") );
             rootSHA1 = new Hash( Hash.Algorithm.SHA1, sha1 );
-            
-            String md5 = hash( new FileInputStream( f ), MessageDigest.getInstance("MD5") );
+
+            String md5 = hash( Files.newInputStream( f.toPath() ), MessageDigest.getInstance("MD5") );
             rootMD5 = new Hash( Hash.Algorithm.MD5, md5 );
 
             // scan for nested libraries
@@ -270,14 +272,16 @@ public class Libraries {
 
     // streaming hash, low memory use
     public static String hash( InputStream is, MessageDigest md ) throws Exception {
-        DigestInputStream dis = new DigestInputStream(is, md);
         byte[] buf = new byte[8192];
-        for (int len; (len = dis.read(buf)) != -1;) {
+        int len;
+
+        try (DigestInputStream dis = new DigestInputStream(is, md)) {
+            while ((len = dis.read(buf)) != -1) {
+            }
         }
         return toHexString(md.digest());
     }
 
-    public static final char[] HEX_ARRAY = "0123456789abcdef".toCharArray();
     public static String toHexString(byte[] bytes) {
         char[] hexChars = new char[bytes.length * 2];
         for (int j = 0; j < bytes.length; j++) {
