@@ -100,12 +100,12 @@ public class Libraries {
     }
 
     private void addRootHashesToRootJar() {
-        for( Component lib : libraries.stream()
+        libraries.stream()
                 .filter(lib -> lib.getHashes() == null || lib.getHashes().isEmpty())
-                .collect(Collectors.toList())) {
-            lib.addHash(rootSHA1);
-            lib.addHash(rootMD5);
-        }
+                .forEach(lib -> {
+                    lib.addHash(rootSHA1);
+                    lib.addHash(rootMD5);
+                });
     }
 
     public void scan( JarFile jarFile, JarInputStream jis, String codesource ) throws Exception {
